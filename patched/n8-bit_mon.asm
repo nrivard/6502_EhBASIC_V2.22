@@ -1,36 +1,31 @@
-; minimal monitor for EhBASIC and 6502 simulator V1.05
-; tabs converted to space, tabwidth=6
+; a minimal loader for EhBASIC meant to run on the n8 Bit Special Computer
+; this is meant to run from RAM and is not installed as part of the ROM!
+; so certain functionality like reset vectors and the like are ommitted
 
-; To run EhBASIC on the simulator load and assemble [F7] this file, start the simulator
-; running [F6] then start the code with the RESET [CTRL][SHIFT]R. Just selecting RUN
-; will do nothing, you'll still have to do a reset to run the code.
+.include "lmaos.inc"
+.include "pseudoinstructions.inc"
+.include "system.inc"
+.include "duart.inc"
+
+.org $8000
+
+Main:
+    JMP RES_vec
 
       .include "basic.asm"
 
-; put the IRQ and MNI code in RAM so that it can be changed
+; put the IRQ and NMI code in RAM so that it can be changed
 
 IRQ_vec     = VEC_SV+2        ; IRQ code vector
 NMI_vec     = IRQ_vec+$0A     ; NMI code vector
 
-; setup for the 6502 simulator environment
-
-IO_AREA     = $F000           ; set I/O area for this monitor
-
-ACIAsimwr   = IO_AREA+$01     ; simulated ACIA write port
-ACIAsimrd   = IO_AREA+$04     ; simulated ACIA read port
-
 ; now the code. all this does is set up the vectors and interrupt code
 ; and wait for the user to select [C]old or [W]arm start. nothing else
-; fits in less than 128 bytes
-
-      *=    $FF80             ; pretend this is in a 1/8K ROM
 
 ; reset vector points here
 
 RES_vec
       CLD                     ; clear decimal mode
-      LDX   #$FF              ; empty stack
-      TXS                     ; set the stack
 
 ; set up vectors and interrupt code, copy them to page 2
 
@@ -69,21 +64,21 @@ LAB_dowarm
 
 ; byte out to simulated ACIA
 
-ACIAout
-      STA   ACIAsimwr         ; save byte to simulated ACIA
+SerialOut:
+      JSR SerialSendByte
       RTS
 
 ; byte in from simulated ACIA
 
-ACIAin
-      LDA   ACIAsimrd         ; get byte from simulated ACIA
-      BEQ   LAB_nobyw         ; branch if no byte waiting
+; EhBASIC expects carry to be set when a byte is received
+SerialIn:
+    DUART_BYTE_AVAIL
+    BCS @Done
+    JSR SerialGetByte
+@Done:
+    INVC
+    RTS
 
-      SEC                     ; flag byte received
-      RTS
-
-LAB_nobyw
-      CLC                     ; flag no byte received
 no_load                       ; empty load vector for EhBASIC
 no_save                       ; empty save vector for EhBASIC
       RTS
@@ -91,8 +86,8 @@ no_save                       ; empty save vector for EhBASIC
 ; vector tables
 
 LAB_vec
-      .word ACIAin            ; byte in from simulated ACIA
-      .word ACIAout           ; byte out to simulated ACIA
+      .word SerialIn            ; byte in from simulated ACIA
+      .word SerialOut           ; byte out to simulated ACIA
       .word no_load           ; null load vector for EhBASIC
       .word no_save           ; null save vector for EhBASIC
 
@@ -123,14 +118,4 @@ END_CODE
 LAB_mess
       .byte $0D,$0A,"6502 EhBASIC [C]old/[W]arm ?",$00
                               ; sign on string
-
-; system vectors
-
-      *=    $FFFA
-
-      .word NMI_vec           ; NMI vector
-      .word RES_vec           ; RESET vector
-      .word IRQ_vec           ; IRQ vector
-
-      .end RES_vec            ; set start at reset vector
       
